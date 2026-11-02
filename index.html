@@ -1,0 +1,138 @@
+<!DOCTYPE html><html lang="es-MX"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes"><title>Fuerza G</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b0f14;color:#e6edf3;font-family:system-ui,-apple-system,sans-serif;padding:env(safe-area-inset-top) 12px 80px}
+h1{font-size:22px;margin:12px 0}h1 b{color:#ff5c39}.card{background:#141a22;border-radius:14px;padding:12px;margin:10px 0}
+.big{font-size:72px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums;line-height:1}.big small{font-size:24px;color:#8b949e}
+.row{display:flex;gap:8px;flex-wrap:wrap}.ax{flex:1;text-align:center;min-width:90px}.ax .v{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}.ax .l{font-size:12px;color:#8b949e}.ax .p{font-size:12px;color:#ffb86b}
+button,select{background:#1f6feb;color:#fff;border:0;border-radius:10px;padding:12px 14px;font-size:16px;font-weight:600}button.alt{background:#30363d}button.red{background:#da3633}button:disabled{opacity:.4}
+select{background:#30363d}canvas{width:100%;display:block;background:#0d1117;border-radius:10px}#msg{color:#ffb86b;font-size:14px}
+.hist{border-bottom:1px solid #30363d;padding:8px 0;font-size:14px}.hist .t{font-weight:700}.small{font-size:13px;color:#8b949e}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#141a22;padding-bottom:env(safe-area-inset-bottom)}nav button{flex:1;border-radius:0;background:none;color:#8b949e}nav button.on{color:#fff}
+.hide{display:none}input[type=range]{width:100%}
+</style></head><body>
+<h1>Fuerza <b>G</b></h1>
+<div id="vLive">
+<div class="card"><div id="msg"></div><div class="row" style="margin-top:6px"><button id="bPerm">Activar sensores</button><button id="bDemo" class="alt">Modo demo</button><button id="bCal" class="alt">Calibrar</button></div></div>
+<div class="card"><div class="big"><span id="gTot">1.00</span><small> g</small></div><div class="small" style="text-align:center">Máx: <span id="gMax">0.00</span> g</div>
+<div class="row" style="margin-top:10px">
+<div class="ax"><div class="l">Lateral</div><div class="v" id="gX">0.00</div><div class="p">pico <span id="pX">0.00</span></div></div>
+<div class="ax"><div class="l">Longitudinal</div><div class="v" id="gY">0.00</div><div class="p">pico <span id="pY">0.00</span></div></div>
+<div class="ax"><div class="l">Vertical</div><div class="v" id="gZ">0.00</div><div class="p">pico <span id="pZ">0.00</span></div></div></div>
+<div class="row" style="margin-top:8px"><button class="alt" id="bRstPk" style="flex:1">Reiniciar picos</button></div></div>
+<div class="card"><div class="row"><canvas id="cGG" width="600" height="600" style="flex:1;max-width:300px;margin:auto"></canvas></div></div>
+<div class="card"><canvas id="cLine" width="800" height="300"></canvas><div class="small"><span style="color:#fff">■ total</span> <span style="color:#ff5c39">■ lat</span> <span style="color:#3fb950">■ long</span> <span style="color:#58a6ff">■ vert</span></div></div>
+<div class="card"><div class="row"><select id="sType" style="flex:1"><option>Auto</option><option>Avión</option><option>Tren</option><option>Fórmula 1</option><option>Cohete</option><option>Otro</option></select></div>
+<div class="row" style="margin-top:8px"><button id="bStart" style="flex:1">▶ Grabar</button><button id="bPause" class="alt" disabled>❚❚ Pausa</button><button id="bStop" class="red" disabled>■ Detener</button></div>
+<div class="small" id="recInfo" style="margin-top:6px">Sin grabar</div></div>
+<div class="card"><label class="small">Filtro pasa-bajas: <span id="lpV">0.30</span> (0 = sin filtro)</label><input type="range" id="lp" min="0" max="0.95" step="0.05" value="0.3"></div>
+</div>
+<div id="vHist" class="hide"><div class="card"><div class="row"><button class="alt" id="bExpAll">Exportar todo (JSON)</button></div><div id="hList"></div></div>
+<div class="card hide" id="detail"><div id="dTitle" class="t"></div><canvas id="cDet" width="800" height="300"></canvas><canvas id="cDetGG" width="600" height="600" style="max-width:300px;margin:8px auto"></canvas>
+<div class="row"><button id="bCSV">CSV</button><button id="bJSON">JSON</button><button class="red" id="bDel">Eliminar</button><button class="alt" id="bClose">Cerrar</button></div></div></div>
+<nav><button id="nLive" class="on">En vivo</button><button id="nHist">Historial</button></nav>
+<script>
+'use strict';
+const G=9.80665,$=id=>document.getElementById(id);
+const S={src:null,alpha:0.3,f:null,ref:null,basis:null,cur:{t:0,x:0,y:0,z:0,g:1},pk:{x:0,y:0,z:0,g:0},buf:[],rec:null,wake:null,demoT:null};
+// ---- math ----
+const norm=v=>Math.hypot(v[0],v[1],v[2]),sc=(v,k)=>v.map(a=>a*k),dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],unit=v=>{const n=norm(v)||1;return sc(v,1/n)};
+function makeBasis(gv){ // gv: gravity reading at rest (device frame, points "up" as reported). vertical axis = unit(gv)
+ const up=unit(gv);let fwd=[0,1,0];// phone's top as forward hint
+ if(Math.abs(dot(fwd,up))>0.9)fwd=[0,0,-1];// phone flat: screen-top... use -z (out of back) fallback
+ fwd=unit(fwd.map((a,i)=>a-dot(fwd,up)*up[i]));const lat=cross(fwd,up);return{up,fwd,lat};}
+function process(aig,t){ // aig: accelerationIncludingGravity m/s^2 device frame
+ const a=S.alpha;S.f=S.f?S.f.map((p,i)=>a*p+(1-a)*aig[i]):aig.slice();const v=S.f;
+ const b=S.basis||makeBasis(S.ref||[0,0,G]);
+ const x=dot(v,b.lat)/G,y=dot(v,b.fwd)/G,z=dot(v,b.up)/G,g=norm(v)/G;
+ S.cur={t,x,y,z,g};const P=S.pk;
+ if(Math.abs(x)>Math.abs(P.x))P.x=x;if(Math.abs(y)>Math.abs(P.y))P.y=y;if(Math.abs(z)>Math.abs(P.z))P.z=z;if(g>P.g)P.g=g;
+ S.buf.push(S.cur);if(S.buf.length>300)S.buf.shift();
+ if(S.rec&&!S.rec.paused){const r=S.rec,el=t-r.t0-r.pausedMs;if(el-r.last>=r.dt||!r.s.length){r.s.push([Math.round(el),+x.toFixed(3),+y.toFixed(3),+z.toFixed(3),+g.toFixed(3)]);r.last=el;}}
+ return S.cur;}
+// ---- sensors ----
+function onMotion(e){const q=e.accelerationIncludingGravity;if(!q||q.x==null)return;S.raw=[q.x,q.y,q.z];process(S.raw,performance.now());}
+function msg(t){$('msg').textContent=t;}
+async function enable(){stopDemo();
+ if(typeof DeviceMotionEvent==='undefined'){msg('Este dispositivo no tiene sensores de movimiento. Usa el modo demo.');return;}
+ if(!window.isSecureContext)msg('Aviso: los sensores requieren HTTPS.');
+ try{if(typeof DeviceMotionEvent.requestPermission==='function'){const r=await DeviceMotionEvent.requestPermission();if(r!=='granted'){msg('Permiso denegado. Actívalo en Ajustes de Safari.');return;}}}catch(err){msg('Error de permiso: '+err.message);return;}
+ window.addEventListener('devicemotion',onMotion);S.src='sensor';msg('Esperando datos del sensor…');
+ setTimeout(()=>{if(!S.raw){msg('No llegan datos del acelerómetro (¿escritorio?). Prueba el modo demo.');}else msg('Sensores activos. Coloca el teléfono fijo y pulsa Calibrar.');},1500);}
+// demo: simulated drive, gravity on z
+function demoSample(t){const s=t/1000;const lat=0.9*Math.sin(s*0.7)+0.15*Math.sin(s*5.3),lon=0.6*Math.sin(s*0.31+1)+(Math.sin(s*0.05)>0.95?2:0),ver=0.08*Math.sin(s*9);
+ return[lat*G,lon*G,(1+ver)*G];}
+function startDemo(){window.removeEventListener('devicemotion',onMotion);S.src='demo';S.ref=[0,0,G];S.basis=makeBasis(S.ref);S.f=null;
+ const t0=performance.now();S.demoT=setInterval(()=>{const t=performance.now();process(demoSample(t-t0),t);},1000/50);msg('Modo demo: datos simulados de un auto en curvas.');}
+function stopDemo(){if(S.demoT){clearInterval(S.demoT);S.demoT=null;}}
+function calibrate(){const v=S.f||S.raw;if(!v){msg('Sin datos para calibrar.');return;}S.ref=v.slice();S.basis=makeBasis(S.ref);
+ S.pk={x:0,y:0,z:0,g:0};localStorage.setItem('fg_ref',JSON.stringify(S.ref));msg('Calibrado: componentes relativos a la posición actual (frente = parte superior del teléfono).');}
+// ---- drawing ----
+function gg(c,pts,cur,maxG){const x=c.getContext('2d'),W=c.width,R=W/2-20,cx=W/2;x.clearRect(0,0,W,W);
+ x.strokeStyle='#30363d';x.lineWidth=2;x.fillStyle='#8b949e';x.font='22px sans-serif';
+ for(let i=1;i<=maxG;i++){x.beginPath();x.arc(cx,cx,R*i/maxG,0,7);x.stroke();x.fillText(i+'g',cx+4,cx-R*i/maxG+22);}
+ x.beginPath();x.moveTo(cx-R,cx);x.lineTo(cx+R,cx);x.moveTo(cx,cx-R);x.lineTo(cx,cx+R);x.stroke();
+ const m=v=>Math.max(-maxG,Math.min(maxG,v))/maxG*R;x.fillStyle='rgba(88,166,255,.35)';
+ for(const p of pts){x.fillRect(cx+m(p[0])-2,cx-m(p[1])-2,4,4);}
+ if(cur){x.fillStyle='#ff5c39';x.beginPath();x.arc(cx+m(cur[0]),cx-m(cur[1]),14,0,7);x.fill();}}
+function line(c,rows){const x=c.getContext('2d'),W=c.width,H=c.height;x.clearRect(0,0,W,H);if(rows.length<2)return;
+ let mx=1.5;for(const r of rows)for(let k=1;k<5;k++)mx=Math.max(mx,Math.abs(r[k]));mx=Math.ceil(mx);
+ const Y=v=>H/2-v/mx*(H/2-10),X=i=>i/(rows.length-1)*W;x.strokeStyle='#30363d';x.lineWidth=1;x.fillStyle='#8b949e';x.font='18px sans-serif';
+ for(let v=-mx;v<=mx;v++){x.beginPath();x.moveTo(0,Y(v));x.lineTo(W,Y(v));x.stroke();x.fillText(v+'g',4,Y(v)-2);}
+ const col=['','#ff5c39','#3fb950','#58a6ff','#ffffff'];
+ for(let k=1;k<5;k++){x.strokeStyle=col[k];x.lineWidth=k==4?3:2;x.beginPath();rows.forEach((r,i)=>i?x.lineTo(X(i),Y(r[k])):x.moveTo(X(i),Y(r[k])));x.stroke();}}
+const f2=v=>(v>=0?'':'−')+Math.abs(v).toFixed(2);
+function loop(){const c=S.cur,P=S.pk;$('gTot').textContent=c.g.toFixed(2);$('gMax').textContent=P.g.toFixed(2);
+ $('gX').textContent=f2(c.x);$('gY').textContent=f2(c.y);$('gZ').textContent=f2(c.z);$('pX').textContent=f2(P.x);$('pY').textContent=f2(P.y);$('pZ').textContent=f2(P.z);
+ if(!$('vLive').classList.contains('hide')){gg($('cGG'),S.buf.map(b=>[b.x,b.y]),[c.x,c.y],Math.max(2,Math.ceil(Math.max(Math.abs(P.x),Math.abs(P.y)))));line($('cLine'),S.buf.map(b=>[0,b.x,b.y,b.z,b.g]));}
+ if(S.rec){const r=S.rec,el=(r.paused?r.pauseAt:performance.now())-r.t0-r.pausedMs;$('recInfo').textContent=(r.paused?'En pausa · ':'● Grabando · ')+r.type+' · '+fmtDur(el)+' · '+r.s.length+' muestras';}
+ requestAnimationFrame(loop);}
+function fmtDur(ms){const s=Math.round(ms/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
+// ---- storage (IndexedDB) ----
+let dbp=null;function db(){return dbp||(dbp=new Promise((ok,ko)=>{const r=indexedDB.open('fuerzag',1);r.onupgradeneeded=()=>r.result.createObjectStore('s',{keyPath:'id'});r.onsuccess=()=>ok(r.result);r.onerror=()=>ko(r.error);}));}
+async function tx(mode,fn){const d=await db();return new Promise((ok,ko)=>{const t=d.transaction('s',mode),st=t.objectStore('s');const r=fn(st);t.oncomplete=()=>ok(r&&r.result);t.onerror=()=>ko(t.error);});}
+const saveS=s=>tx('readwrite',st=>st.put(s)),allS=()=>tx('readonly',st=>st.getAll()),delS=id=>tx('readwrite',st=>st.delete(id));
+// ---- recording ----
+async function wake(on){try{if(on&&'wakeLock'in navigator){S.wake=await navigator.wakeLock.request('screen');}else if(!on&&S.wake){await S.wake.release();S.wake=null;}}catch(e){}}
+if(typeof document!=='undefined')document.addEventListener('visibilitychange',()=>{if(S.rec&&!S.rec.paused&&document.visibilityState==='visible')wake(true);});
+function start(){if(!S.src){msg('Primero activa los sensores o el modo demo.');return;}
+ S.rec={id:Date.now(),type:$('sType').value,t0:performance.now(),date:new Date().toISOString(),pausedMs:0,paused:false,last:-1e9,dt:50,s:[]};S.pk={x:0,y:0,z:0,g:0};
+ wake(true);$('bStart').disabled=true;$('bPause').disabled=false;$('bStop').disabled=false;$('sType').disabled=true;}
+function pause(){const r=S.rec;if(!r)return;if(!r.paused){r.paused=true;r.pauseAt=performance.now();$('bPause').textContent='▶ Seguir';wake(false);}else{r.pausedMs+=performance.now()-r.pauseAt;r.paused=false;$('bPause').textContent='❚❚ Pausa';wake(true);}}
+function summarize(r){const s=r.s;let mx=0,sum=0;for(const q of s){mx=Math.max(mx,q[4]);sum+=q[4];}
+ const pk=[1,2,3].map(k=>s.reduce((m,q)=>Math.abs(q[k])>Math.abs(m)?q[k]:m,0));
+ return{id:r.id,type:r.type,date:r.date,dur:s.length?s[s.length-1][0]:0,maxG:+mx.toFixed(3),avgG:s.length?+(sum/s.length).toFixed(3):0,peaks:pk,src:S.src,cols:['ms','lat','long','vert','total'],s};}
+async function stop(){const r=S.rec;if(!r)return;S.rec=null;wake(false);$('bStart').disabled=false;$('bPause').disabled=true;$('bStop').disabled=true;$('sType').disabled=false;$('bPause').textContent='❚❚ Pausa';
+ if(r.s.length<2){$('recInfo').textContent='Sesión muy corta, no guardada.';return;}const s=summarize(r);await saveS(s);$('recInfo').textContent='Guardada: '+s.type+' · máx '+s.maxG.toFixed(2)+' g';renderHist();}
+// ---- history ----
+let curDet=null;
+async function renderHist(){const L=(await allS()).sort((a,b)=>b.id-a.id);const h=$('hList');h.innerHTML=L.length?'':'<div class="small">Aún no hay sesiones.</div>';
+ for(const s of L){const d=document.createElement('div');d.className='hist';d.innerHTML='<div class="t"></div><div class="small"></div>';
+  d.firstChild.textContent=s.type+' · '+new Date(s.date).toLocaleString('es-MX',{dateStyle:'medium',timeStyle:'short'});
+  d.lastChild.textContent='Duración '+fmtDur(s.dur)+' · máx '+s.maxG.toFixed(2)+' g · prom '+s.avgG.toFixed(2)+' g'+(s.src==='demo'?' · demo':'');d.onclick=()=>showDet(s);h.appendChild(d);}}
+function showDet(s){curDet=s;$('detail').classList.remove('hide');$('dTitle').textContent=s.type+' · máx '+s.maxG.toFixed(2)+' g · picos lat '+f2(s.peaks[0])+' / long '+f2(s.peaks[1])+' / vert '+f2(s.peaks[2]);
+ const step=Math.max(1,Math.floor(s.s.length/800));const rows=s.s.filter((_,i)=>i%step===0);line($('cDet'),rows);
+ gg($('cDetGG'),s.s.map(q=>[q[1],q[2]]),null,Math.max(2,Math.ceil(Math.max(Math.abs(s.peaks[0]),Math.abs(s.peaks[1])))));$('detail').scrollIntoView({behavior:'smooth'});}
+function dl(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);}
+function toCSV(s){return 'ms,lateral_g,longitudinal_g,vertical_g,total_g\n'+s.s.map(q=>q.join(',')).join('\n');}
+const fname=s=>'fuerza-g_'+s.type.normalize('NFD').replace(/[^\w]/g,'')+'_'+s.date.slice(0,19).replace(/[:T]/g,'-');
+// ---- wiring ----
+if(typeof document!=='undefined'&&document.body){
+ $('bPerm').onclick=enable;$('bDemo').onclick=startDemo;$('bCal').onclick=calibrate;$('bRstPk').onclick=()=>S.pk={x:0,y:0,z:0,g:0};
+ $('bStart').onclick=start;$('bPause').onclick=pause;$('bStop').onclick=stop;
+ $('lp').oninput=e=>{S.alpha=+e.target.value;$('lpV').textContent=S.alpha.toFixed(2);};
+ $('bCSV').onclick=()=>curDet&&dl(fname(curDet)+'.csv',toCSV(curDet),'text/csv');$('bJSON').onclick=()=>curDet&&dl(fname(curDet)+'.json',JSON.stringify(curDet),'application/json');
+ $('bDel').onclick=async()=>{if(curDet&&confirm('¿Eliminar esta sesión?')){await delS(curDet.id);curDet=null;$('detail').classList.add('hide');renderHist();}};
+ $('bClose').onclick=()=>$('detail').classList.add('hide');$('bExpAll').onclick=async()=>dl('fuerza-g_todo.json',JSON.stringify(await allS()),'application/json');
+ const tab=l=>{$('vLive').classList.toggle('hide',!l);$('vHist').classList.toggle('hide',l);$('nLive').classList.toggle('on',l);$('nHist').classList.toggle('on',!l);if(!l)renderHist();};
+ $('nLive').onclick=()=>tab(true);$('nHist').onclick=()=>tab(false);
+ try{const r=JSON.parse(localStorage.getItem('fg_ref'));if(r){S.ref=r;S.basis=makeBasis(r);}}catch(e){}
+ if(typeof DeviceMotionEvent==='undefined'||!('ontouchstart'in window))msg('No se detectan sensores de movimiento (¿escritorio?). Puedes usar el modo demo.');
+ else msg('Pulsa "Activar sensores" para empezar.');
+ if('serviceWorker'in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
+ requestAnimationFrame(loop);}
+if(typeof module!=='undefined')module.exports={S,process,demoSample,makeBasis,summarize,toCSV};
+</script></body></html>
